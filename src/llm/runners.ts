@@ -101,8 +101,12 @@ export function makeApiCaller(env: NodeJS.ProcessEnv = process.env): CallApi {
               { role: "system", content: system },
               { role: "user", content: user },
             ],
-            max_tokens: 1024,
+            // 사고(thinking) 토큰도 이 예산을 먹는다. 작게 잡으면
+            // 본문이 조각만 남아 JSON 이 깨진다 — 실제로 77자짜리 파편을 받았다.
+            max_tokens: 8192,
             temperature: 0.8,
+            // 부탁이 아니라 강제. 프롬프트로만 시키면 산문을 쓴다.
+            response_format: { type: "json_object" },
           }),
         },
       );
@@ -128,7 +132,8 @@ export function makeApiCaller(env: NodeJS.ProcessEnv = process.env): CallApi {
             { role: "user", content: user },
           ],
           // 최신 모델은 max_tokens 대신 이 이름을 받는다
-          max_completion_tokens: 1024,
+          max_completion_tokens: 8192,
+          response_format: { type: "json_object" },
         }),
       });
       if (!res.ok) {

@@ -135,12 +135,21 @@ export function extractJson<T = unknown>(raw: string): T {
   const candidate = fenced?.[1] ?? raw;
 
   const start = candidate.search(/[[{]/);
-  if (start === -1) throw new Error("E-LLM-422: 응답에 JSON 이 없다");
+  if (start === -1) {
+    // 무엇을 받았는지 알려 준다. 이게 없으면 원인을 못 찾는다.
+    throw new Error(
+      `E-LLM-422: 응답에 JSON 이 없다 (${raw.length}자). 받은 것: ${JSON.stringify(raw.slice(0, 400))}`,
+    );
+  }
 
   const opener = candidate[start];
   const closer = opener === "{" ? "}" : "]";
   const end = candidate.lastIndexOf(closer);
-  if (end <= start) throw new Error("E-LLM-422: JSON 이 닫히지 않았다");
+  if (end <= start) {
+    throw new Error(
+      `E-LLM-422: JSON 이 닫히지 않았다. 받은 것: ${JSON.stringify(raw.slice(0, 400))}`,
+    );
+  }
 
   return JSON.parse(candidate.slice(start, end + 1)) as T;
 }

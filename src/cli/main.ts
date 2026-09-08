@@ -89,6 +89,11 @@ async function cmdGenerate(topic: string): Promise<void> {
   console.log(`\n생성 중 — ${opts.primary}${opts.secondary ? ` → ${opts.secondary}` : ""}`);
 
   const res = await generate(prompt.system, prompt.user, opts, deps);
+  if (process.env["LLM_DEBUG"]) {
+    console.log("--- 모델이 준 원문 ---");
+    console.log(res.text);
+    console.log("--- 끝 ---");
+  }
   const parsed = extractJson<{ posts?: ThreadsPost[] }>(res.text);
   const posts = parsed.posts ?? [];
   console.log(`응답: ${res.usedProvider}${res.fellBack ? " (폴백)" : ""}\n`);

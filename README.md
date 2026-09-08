@@ -241,9 +241,11 @@ LLM_SECONDARY=gemini-api    # primary 가 죽으면 여기로
 - 로그인·권한 — 로컬 전용 전제
 - 이미지/영상 발행, 답글 자동응대, 성과 수집
 
-## 회고
+## 문서
 
-[`docs/회고.md`](docs/회고.md)
+- [`docs/실행-치트시트.md`](docs/실행-치트시트.md) — 글 한 편 올리는 명령 전부
+- [`docs/supabase-setup.md`](docs/supabase-setup.md) — Postgres 붙이기
+- [`docs/회고.md`](docs/회고.md)
 
 ## 주의
 

@@ -47,10 +47,13 @@ npm run test:supabase
 인메모리와 **똑같은 계약 테스트**가 실제 DB에도 돈다. 통과하면 이렇게 나온다.
 
 ```
-✓ MemoryJobStore — 저장소 계약    (13 tests)
-✓ SupabaseJobStore — 저장소 계약  (13 tests)
-✓ 실제 DB 에 붙어 계약을 통과했다
+✓ src/queue/contract.test.ts   (28)  4810ms
+ Test Files  6 passed (6)
+      Tests  110 passed | 1 skipped (111)
 ```
+
+`contract.test.ts`가 15개에서 **28개**로 늘고, 25ms 에서 **4810ms**로 느려지면 붙은 것이다.
+느려진 것이 곧 증거다 — 인메모리라면 그 시간이 안 나온다.
 
 테스트는 자기가 만든 잡만 지우고 끝난다(`afterAll`). 다른 데이터는 건드리지 않는다.
 

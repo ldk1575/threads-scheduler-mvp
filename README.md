@@ -95,6 +95,17 @@ $ npm test
       Tests  97 passed (97)
 ```
 
+`.env`에 Supabase 접속 정보를 채우면 **같은 계약이 실제 Postgres에도** 돈다.
+
+```
+$ npm run test:supabase
+ ✓ src/queue/contract.test.ts   (28)  4810ms   ← 인메모리 13 + Postgres 13
+ Test Files  6 passed (6)
+      Tests  110 passed | 1 skipped (111)
+```
+
+25ms → **4810ms**. 190배 느려진 게 서울 리전까지 왕복했다는 증거다.
+
 ```
 $ npm run demo
   훅 3종 선정: H1 고민 직격형 / H2 숫자 충격형 / H6 손실회피·경고형

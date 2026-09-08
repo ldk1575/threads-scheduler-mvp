@@ -88,17 +88,45 @@ async function cmdGenerate(topic: string): Promise<void> {
   const { opts, deps } = llm();
   console.log(`\n생성 중 — ${opts.primary}${opts.secondary ? ` → ${opts.secondary}` : ""}`);
 
-  const res = await generate(prompt.system, prompt.user, opts, deps);
-  if (process.env["LLM_DEBUG"]) {
-    console.log("--- 모델이 준 원문 ---");
-    console.log(res.text);
-    console.log("--- 끝 ---");
+  /**
+   * 한 번 더 시도한다.
+   *
+   * 글 3개 중 하나만 규칙을 어겨도 배치가 통째로 거절된다.
+   * 그때 사람이 다시 치게 두는 대신, **무엇이 틀렸는지 모델에게 돌려주고** 다시 받는다.
+   * 그래도 안 되면 그때 사람이 판단한다.
+   */
+  async function ask(extra = ""): Promise<{ posts: ThreadsPost[]; provider: string }> {
+    const res = await generate(prompt.system, prompt.user + extra, opts, deps);
+    if (process.env["LLM_DEBUG"]) {
+      console.log("--- 모델이 준 원문 ---");
+      console.log(res.text);
+      console.log("--- 끝 ---");
+    }
+    const parsed = extractJson<{ posts?: ThreadsPost[] }>(res.text);
+    return {
+      posts: parsed.posts ?? [],
+      provider: `${res.usedProvider}${res.fellBack ? " (폴백)" : ""}`,
+    };
   }
-  const parsed = extractJson<{ posts?: ThreadsPost[] }>(res.text);
-  const posts = parsed.posts ?? [];
-  console.log(`응답: ${res.usedProvider}${res.fellBack ? " (폴백)" : ""}\n`);
 
-  const gate = validateTopicPosts(posts, Boolean(process.env["TRACKING_LINK"]));
+  const withLink = Boolean(process.env["TRACKING_LINK"]);
+  let { posts, provider } = await ask();
+  let gate = validateTopicPosts(posts, withLink);
+
+  if (!gate.ok) {
+    console.log(`응답: ${provider} — 검증 실패, 고쳐서 다시 요청합니다`);
+    for (const e of gate.errors) console.log(`  ✗ ${e}`);
+
+    const feedback =
+      "\n[재작성 요구] 앞서 만든 글이 아래를 어겼다. 그 점만 고쳐서 3개를 다시 만들어라.\n" +
+      gate.errors.map((e) => `- ${e}`).join("\n");
+
+    ({ posts, provider } = await ask(feedback));
+    gate = validateTopicPosts(posts, withLink);
+    console.log();
+  }
+
+  console.log(`응답: ${provider}\n`);
 
   posts.forEach((p, i) => {
     console.log(`── ${i + 1}. ${p.hook_type} · ${p.structure} · ${p.text.length}자 · ${p.cta_kind}`);

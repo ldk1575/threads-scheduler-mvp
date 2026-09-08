@@ -1,0 +1,21 @@
+{
+  "name": "threads-publish-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Threads 텍스트 예약 발행 — 채널 배포(POST) 도메인 MVP (MVP)",
+  "type": "module",
+  "engines": {
+    "node": ">=20.6"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "demo": "vitest run src/demo --reporter=verbose"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

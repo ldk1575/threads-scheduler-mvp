@@ -1,0 +1,44 @@
+# ── 비밀값 ──────────────────────────────────────────────
+# 이 저장소는 Public 이다. 아래가 뚫리면 계정이 통째로 넘어간다.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# 한글 파일명으로 키를 두는 습관이 있어 넓게 막는다.
+# (부모 폴더의 `claude API키.txt` 류가 실수로 복사돼 들어오는 것을 차단)
+*키*.txt
+*토큰*.txt
+*token*.txt
+*secret*
+*credential*
+
+# 브라우저 프로필 = 로그인 세션 쿠키. 절대 커밋 금지.
+browser_profile/
+**/Default/Network/Cookies
+**/Login Data
+**/Local State
+
+# ── 빌드 산출물 ─────────────────────────────────────────
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# ── 로컬 실행 상태 ──────────────────────────────────────
+# 예약 큐·발행 이력의 로컬 파일 저장소 (실데이터·permalink 포함 가능)
+.data/
+*.sqlite
+*.sqlite-journal
+
+# ── 대용량·배포물 ───────────────────────────────────────
+*.msi
+*.exe
+*.zip
+
+# ── OS·에디터 ───────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log

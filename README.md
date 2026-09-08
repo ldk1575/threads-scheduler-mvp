@@ -163,9 +163,37 @@ npm run test:supabase   # 같은 계약 테스트가 실제 DB 에도 돈다
 
 실제 계정에 붙이려면 `.env.example`을 `.env`로 복사해 채운다. **`.env`는 커밋되지 않는다.**
 
+## 실제 계정에 올리기
+
+```bash
+npm run cli -- connect                  # 토큰 확인 · 쿼터 조회
+npm run cli -- generate "<주제>"         # 글 3종 생성 → 검증 → 저장 (안 올라감)
+npm run cli -- publish 1 --dry          # 올릴 글 최종 확인 (안 올라감)
+npm run cli -- publish 1                # 실제 발행
+```
+
+`generate` 와 `publish` 를 나눈 이유 — **`publish` 는 진짜 올라가고 되돌리려면 손으로 지워야 한다.**
+그래서 중간에 눈으로 보는 단계를 강제로 넣었고, `--dry` 로 한 번 더 확인할 수 있다.
+
+`generate` 가 하는 일:
+
+1. 훅 3종을 **코드가 골라 프롬프트에 지정**한다 (모델이 고르게 두지 않는다). 최근 쓴 훅은 피한다
+2. LLM 호출 — primary 실패 시 secondary 로 폴백
+3. **검증 게이트** — 훅·구조 중복, 직접 판매어, 100자 초과, 실제 URL 이면 거절
+4. **안전 필터 2단** — 키워드 → AI 적합성 판정. AI 판정이 실패하면 통과시키지 않는다
+5. 통과한 것만 `.data/drafts.json` 에 저장
+
+### LLM 백엔드
+
+`.env` 두 줄로 정한다. CLI 백엔드는 설치된 구독 CLI 를 비대화형으로 부르므로 API 키가 필요 없다.
+
+```
+LLM_PRIMARY=claude-cli      # gemini-cli | codex-cli | claude-cli | claude-api | gemini-api | openai-api
+LLM_SECONDARY=gemini-api    # primary 가 죽으면 여기로
+```
+
 ## 아직 안 한 것
 
-- 실제 Threads 계정 발행 — 지금은 전부 **가짜 API**로만 검증했다
 - 채널 토큰 저장 테이블 — 토큰은 앱 레벨 암호화 후 넣어야 한다
 - 로그인·권한 — 로컬 전용 전제
 - 이미지/영상 발행, 답글 자동응대, 성과 수집

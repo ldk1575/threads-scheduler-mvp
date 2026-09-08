@@ -80,6 +80,19 @@ export class ThreadsClient {
     return body;
   }
 
+  /**
+   * 숫자 사용자 ID 를 얻는다.
+   *
+   * API 경로에는 **숫자 ID** 만 들어간다. `me` 나 사용자명(`@handle`)을 넣으면
+   * `Object with ID '...' does not exist` 로 거절된다 — 흔히 밟는 함정이라
+   * 코드가 알아서 풀어 준다. 한 번 풀면 캐시한다.
+   */
+  async #resolveUserId(): Promise<string> {
+    if (/^\d+$/.test(this.#userId)) return this.#userId;
+    this.#userId = (await this.me()).id;
+    return this.#userId;
+  }
+
   /** 토큰이 살아 있는지 확인하고 username 을 얻는다. */
   async me(): Promise<{ id: string; username?: string }> {
     const r = (await this.#call(`/me?fields=id,username`)) as {
@@ -97,8 +110,9 @@ export class ThreadsClient {
    * 이 둘을 섞어 놨다. 그대로 썼으면 조회가 통째로 실패했다.
    */
   async getPublishingLimit(): Promise<{ quota_usage: number; quota_total: number } | null> {
+    const uid = await this.#resolveUserId();
     const r = (await this.#call(
-      `/${this.#userId}/threads_publishing_limit?fields=quota_usage,config`,
+      `/${uid}/threads_publishing_limit?fields=quota_usage,config`,
     )) as {
       data?: Array<{
         quota_usage?: number;
@@ -125,8 +139,9 @@ export class ThreadsClient {
    * 그 사이에 무엇이 올라갔는지 알 수 없게 된다.
    */
   async publishText(text: string): Promise<{ mediaId: string; permalink?: string }> {
+    const uid = await this.#resolveUserId();
     const created = (await this.#call(
-      `/${this.#userId}/threads?media_type=TEXT&text=${encodeURIComponent(text)}`,
+      `/${uid}/threads?media_type=TEXT&text=${encodeURIComponent(text)}`,
       { method: "POST" },
     )) as { id?: string };
 
@@ -137,7 +152,7 @@ export class ThreadsClient {
     await this.#sleep(CREATE_PUBLISH_DELAY_MS);
 
     const published = (await this.#call(
-      `/${this.#userId}/threads_publish?creation_id=${encodeURIComponent(created.id)}`,
+      `/${uid}/threads_publish?creation_id=${encodeURIComponent(created.id)}`,
       { method: "POST" },
     )) as { id?: string };
 
@@ -172,8 +187,9 @@ export class ThreadsClient {
     parentMediaId: string,
     text: string,
   ): Promise<{ mediaId: string; permalink?: string }> {
+    const uid = await this.#resolveUserId();
     const created = (await this.#call(
-      `/${this.#userId}/threads?media_type=TEXT&reply_to_id=${encodeURIComponent(parentMediaId)}&text=${encodeURIComponent(text)}`,
+      `/${uid}/threads?media_type=TEXT&reply_to_id=${encodeURIComponent(parentMediaId)}&text=${encodeURIComponent(text)}`,
       { method: "POST" },
     )) as { id?: string };
 
@@ -185,7 +201,7 @@ export class ThreadsClient {
     await this.#sleep(CREATE_PUBLISH_DELAY_MS * 2);
 
     const published = (await this.#call(
-      `/${this.#userId}/threads_publish?creation_id=${encodeURIComponent(created.id)}`,
+      `/${uid}/threads_publish?creation_id=${encodeURIComponent(created.id)}`,
       { method: "POST" },
     )) as { id?: string };
 

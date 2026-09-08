@@ -12,15 +12,18 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "demo": "vitest run src/demo --reporter=verbose",
-    "test:supabase": "node -r dotenv/config node_modules/vitest/vitest.mjs run"
+    "test:supabase": "node -r dotenv/config node_modules/vitest/vitest.mjs run",
+    "cli": "node -r dotenv/config --import tsx src/cli/main.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "dotenv": "^17.4.2",
+    "tsx": "^4.23.13",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
     "@supabase/supabase-js": "^2.116.0"
   }
 }

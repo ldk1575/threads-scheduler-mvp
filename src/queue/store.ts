@@ -13,58 +13,30 @@
 import {
   buildIdempotencyKey,
   classifyFailure,
-  nextRetryDelayMs,
   type ApiFailure,
 } from "../core/publish.ts";
 
-export type JobStatus =
-  | "queued"
-  | "publishing"
-  | "success"
-  | "failed"
-  | "dead"
-  | "cancelled";
+export type {
+  JobStatus,
+  EnqueueInput,
+  Job,
+  PostInput,
+  PostRecord,
+  EnqueueResult,
+  JobStore,
+} from "./job-store.ts";
 
-export type EnqueueInput = {
-  draftId: string;
-  channel: string;
-  channelAccountId: string;
-  productId: string;
-  linkId?: string | null;
-  bodyTemplate: string;
-  /** 첫 댓글 본론. 있으면 링크는 본문이 아니라 여기에 들어간다. */
-  replyTemplate?: string;
-  scheduledAt: Date;
-};
+import type {
+  EnqueueInput,
+  EnqueueResult,
+  Job,
+  JobStore,
+  PostInput,
+  PostRecord,
+} from "./job-store.ts";
+import { MAX_RETRIES, STUCK_MESSAGE } from "./job-store.ts";
 
-export type Job = EnqueueInput & {
-  id: string;
-  idempotencyKey: string;
-  status: JobStatus;
-  retryCount: number;
-  lastError?: string;
-  createdAt: Date;
-  updatedAt: Date;
-};
-
-export type PostInput = {
-  externalPostId: string;
-  permalink?: string;
-  bodyFinal: string;
-  /** 첫 댓글을 달았다면 그 id */
-  replyExternalId?: string;
-  /** 첫 댓글의 실제 발행 본문 */
-  replyFinal?: string;
-};
-
-export type PostRecord = PostInput & {
-  id: string;
-  publishJobId: string;
-  channel: string;
-  publishedAt: Date;
-};
-
-export class MemoryJobStore {
+export class MemoryJobStore implements JobStore {
   #jobs = new Map<string, Job>();
   /** idempotencyKey → jobId. 이 맵이 중복 발행을 막는 자물쇠다. */
   #byKey = new Map<string, string>();
@@ -83,7 +55,7 @@ export class MemoryJobStore {
   async enqueue(
     input: EnqueueInput,
     now: Date = new Date(),
-  ): Promise<{ job: Job; duplicated: boolean }> {
+  ): Promise<EnqueueResult> {
     if (input.scheduledAt.getTime() < now.getTime()) {
       throw new Error(
         `E-POST-400: 과거 시각으로는 예약할 수 없다 (${input.scheduledAt.toISOString()})`,
@@ -165,7 +137,7 @@ export class MemoryJobStore {
     }
 
     job.retryCount += 1;
-    job.status = nextRetryDelayMs(job.retryCount) === null ? "dead" : "queued";
+    job.status = job.retryCount >= MAX_RETRIES ? "dead" : "queued";
   }
 
   /**
@@ -192,8 +164,7 @@ export class MemoryJobStore {
     for (const job of this.#jobs.values()) {
       if (job.status !== "publishing") continue;
       job.status = "failed";
-      job.lastError =
-        "발행 도중 중단됨 — 이미 게시됐을 수 있으니 프로필을 확인한 뒤 다시 예약하세요";
+      job.lastError = STUCK_MESSAGE;
       job.updatedAt = new Date();
       n += 1;
     }

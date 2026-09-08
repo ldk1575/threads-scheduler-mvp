@@ -11,11 +11,16 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "demo": "vitest run src/demo --reporter=verbose"
+    "demo": "vitest run src/demo --reporter=verbose",
+    "test:supabase": "node -r dotenv/config node_modules/vitest/vitest.mjs run"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "dotenv": "^17.4.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.116.0"
   }
 }

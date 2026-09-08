@@ -25,10 +25,16 @@ src/
   content/threads.ts     훅 라이브러리 H1~H10 · 로테이션 · 프롬프트 · 검증 게이트
   content/safety.ts      2단 안전 필터 — 키워드 → AI 적합성 판정
   llm/provider.ts        LLM 백엔드 추상화 + 폴백 (CLI / API)
-  queue/store.ts         발행 큐 — 중복 등록·동시 집기 차단, 재시도·중단복구
+  queue/job-store.ts     저장소 계약 (두 구현이 공유)
+  queue/store.ts         인메모리 큐 — 설정 없이 도는 기본값
+  queue/supabase-store.ts  Postgres 큐 — 원자성을 DB 제약이 강제
+  queue/contract.test.ts   같은 테스트를 두 구현에 돌린다
   threads/client.ts      Threads Graph API — 2단계 발행, 첫 댓글, 쿼터 조회
   worker/publish-due.ts  워커 — 집기 → 쿼터 → 링크주입 → 발행 → 첫 댓글 → 기록
   demo/e2e.test.ts       한 흐름 관통 (가짜 API, 토큰 없이 전 구간)
+
+supabase/
+  migrations/0001_init.sql   테이블 · UNIQUE 제약 · 트랜잭션 함수 · RLS
 ```
 
 ### 멱등성 — 이 저장소의 핵심
@@ -50,8 +56,9 @@ if (existingId !== undefined) return { job: ..., duplicated: true };
 this.#byKey.set(key, job.id);
 ```
 
-> 프로세스가 여럿이면 이 보장은 깨진다. 실제 배포에서는 DB의 **unique 제약**이 유일한 진실이 되고,
-> 잡 집기는 `status='queued' → 'publishing'` 조건부 UPDATE의 **갱신 행 수**로 판정해야 한다.
+> 프로세스가 여럿이면 이 보장은 깨진다. 그래서 **Postgres 구현을 나란히 뒀다** — 거기서는
+> `idempotency_key`의 UNIQUE 제약과 조건부 UPDATE의 갱신 행 수가 같은 일을 한다.
+> 두 구현은 [같은 계약 테스트](src/queue/contract.test.ts)를 통과해야 한다.
 
 ### 검증 게이트 — 규칙을 문서가 아니라 코드에 둔다
 
@@ -82,9 +89,10 @@ $ npm test
  ✓ src/llm/provider.test.ts     (18 tests)
  ✓ src/queue/store.test.ts      (14 tests)
  ✓ src/content/threads.test.ts  (24 tests)
+ ✓ src/queue/contract.test.ts   (15 tests)   ← 두 구현 공통 계약
  ✓ src/demo/e2e.test.ts         (5 tests)
- Test Files  5 passed (5)
-      Tests  83 passed (83)
+ Test Files  6 passed (6)
+      Tests  97 passed (97)
 ```
 
 ```
@@ -130,9 +138,16 @@ $ npm run demo
 
 ```bash
 npm install
-npm test          # 83개
+npm test          # 97개 (인메모리)
 npm run demo      # 한 흐름을 눈으로
 npm run typecheck
+```
+
+**Postgres에 붙이려면** → [`docs/supabase-setup.md`](docs/supabase-setup.md)
+스키마를 적용하고 `.env`를 채운 뒤:
+
+```bash
+npm run test:supabase   # 같은 계약 테스트가 실제 DB 에도 돈다
 ```
 
 실제 계정에 붙이려면 `.env.example`을 `.env`로 복사해 채운다. **`.env`는 커밋되지 않는다.**
@@ -140,7 +155,7 @@ npm run typecheck
 ## 아직 안 한 것
 
 - 실제 Threads 계정 발행 — 지금은 전부 **가짜 API**로만 검증했다
-- 영속 저장소 연결 (현재는 인메모리)
+- 채널 토큰 저장 테이블 — 토큰은 앱 레벨 암호화 후 넣어야 한다
 - 로그인·권한 — 로컬 전용 전제
 - 이미지/영상 발행, 답글 자동응대, 성과 수집
 

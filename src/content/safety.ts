@@ -14,9 +14,25 @@
 
 import { extractJson, generate, type LlmDeps, type LlmOptions } from "../llm/provider.ts";
 
-/** 기본 차단 키워드. 운영 중에 늘어나므로 설정으로 뺀다. */
-export const DEFAULT_SPAM_KEYWORDS: readonly string[] = [
-  "성인",
+/**
+ * 차단 규칙 하나. 문자열이면 부분 문자열, 정규식이면 패턴으로 검사한다.
+ *
+ * 정규식도 **소문자 기준**으로 쓴다 — 검사 전에 본문을 소문자로 내린다.
+ */
+export type SpamKeyword = string | RegExp;
+
+/**
+ * 기본 차단 키워드. 운영 중에 늘어나므로 설정으로 뺀다.
+ *
+ * 짧은 낱말은 문자열로 적으면 안 된다. 한국어는 조사·어미가 붙어 다니고
+ * 띄어쓰기도 없어서, 짧은 말일수록 애먼 낱말 **안쪽**에 그대로 들어앉는다.
+ * 그런 말은 정규식으로 적어 낱말이 시작하는 자리에서만 잡는다.
+ */
+export const DEFAULT_SPAM_KEYWORDS: readonly SpamKeyword[] = [
+  // "성인" 을 문자열로 두면 지성인데·건성인·복합성인이 전부 걸린다.
+  // 뷰티 계정에서는 피부 타입 + '인' 이 가장 자연스러운 표현이라 계속 터진다.
+  // 앞에 한글이 붙어 있으면 그건 다른 낱말이다.
+  /(?<![가-힣])성인/,
   "19금",
   "도박",
   "카지노",
@@ -33,17 +49,29 @@ export type SafetyVerdict = {
   stage: "keyword" | "ai" | "passed";
 };
 
+/** 규칙에 걸린 부분을 돌려준다. 안 걸리면 null. */
+function matched(lower: string, k: SpamKeyword): string | null {
+  if (typeof k === "string") {
+    const needle = k.toLowerCase();
+    return lower.includes(needle) ? k : null;
+  }
+  return k.exec(lower)?.[0] ?? null;
+}
+
 /** 1단 — 키워드. AI 를 부르기 전에 끝낸다. */
 export function keywordScreen(
   text: string,
-  keywords: readonly string[] = DEFAULT_SPAM_KEYWORDS,
+  keywords: readonly SpamKeyword[] = DEFAULT_SPAM_KEYWORDS,
 ): SafetyVerdict {
   const lower = text.toLowerCase();
   for (const k of keywords) {
-    if (lower.includes(k.toLowerCase())) {
+    // 사유에는 규칙이 아니라 **본문에서 실제로 걸린 말**을 적는다.
+    // 정규식 소스를 그대로 뱉으면 읽는 사람이 어디가 문제인지 못 찾는다.
+    const m = matched(lower, k);
+    if (m !== null) {
       return {
         ai_use: false,
-        ai_skip_reason: `차단 키워드 포함: ${k}`,
+        ai_skip_reason: `차단 키워드 포함: ${m}`,
         stage: "keyword",
       };
     }
@@ -99,7 +127,7 @@ export async function screen(
   text: string,
   llm: LlmOptions,
   deps: LlmDeps = {},
-  keywords: readonly string[] = DEFAULT_SPAM_KEYWORDS,
+  keywords: readonly SpamKeyword[] = DEFAULT_SPAM_KEYWORDS,
 ): Promise<SafetyVerdict> {
   const first = keywordScreen(text, keywords);
   if (!first.ai_use) return first;

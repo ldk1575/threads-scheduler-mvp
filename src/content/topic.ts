@@ -9,6 +9,7 @@
 import {
   CTA_PLACEHOLDER,
   FIRST_COMMENT_RULES,
+  MAX_HOOK_CHARS,
   MAX_POST_CHARS,
   MIN_POST_CHARS,
   pickHooks,
@@ -68,7 +69,7 @@ export function buildTopicPrompt(
       ? [
           `[경험] ${meta.experience}`,
           "**[경험] 에 적힌 것이 내가 가진 전부다.** 여기 없는 이력·기간·나이대·피부 타입·직업을 지어내지 마라.",
-          "특히 '2년 넘게', '고등학생 때부터', '어릴 때부터' 같은 과거 이력은 [경험] 에 있을 때만 쓴다.",
+          "특히 '2년 넘게', '고등학생 때부터', '어릴 때부터', '평생' 같은 과거 이력은 [경험] 에 있을 때만 쓴다.",
           "쓸 이야기가 모자라면 과거를 만들지 말고 **지금 시점**('요즘', '이번에', '어제')으로 쓴다.",
         ]
       : ["내 개인 이력이 주어지지 않았다. 1인칭 경험담을 지어내지 말고 일반론으로 쓴다."]),
@@ -99,7 +100,7 @@ export function buildTopicPrompt(
     "- 스레드 글 3개. 아래 지정된 훅을 하나씩 쓴다. 구조 유형도 서로 달라야 한다.",
     ...hooks.map((h, i) => `  ${i + 1}) ${h.id} ${h.name} — ${h.formula}`),
     "- 구조 유형은 다음에서 고른다: 고백경험담형 / 리스트형 / 반전형 / 비교형 / 질문폭격형 / 한줄반복형 / 스토리텔링형 / 대댓글유도형",
-    `- 각 글: 첫 줄 훅(35자 이내) + 본문 + 마지막 줄 마무리. 전체 ${MIN_POST_CHARS}~${MAX_POST_CHARS}자.`,
+    `- 각 글: 첫 줄 훅(${MAX_HOOK_CHARS}자 이내) + 본문 + 마지막 줄 마무리. 전체 ${MIN_POST_CHARS}~${MAX_POST_CHARS}자.`,
     "- 본문은 한 문장으로 끝내지 마라. 장면·과정·바뀐 점 중 하나는 반드시 들어간다.",
     ctaLine,
     `- cta_kind 는 ${CTA_KINDS.join(" / ")} 중 하나.`,

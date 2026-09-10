@@ -16,10 +16,20 @@ import { buildTopicPrompt, validateTopicPosts } from "../content/topic.ts";
 import { extractJson, generate } from "../llm/provider.ts";
 import { makeApiCaller, makeCliRunner, readLlmOptions } from "../llm/runners.ts";
 import { decideQuota, injectTrackingLink, THREADS_MAX_CHARS } from "../core/publish.ts";
+import { countChars } from "../content/threads.ts";
 import { screen } from "../content/safety.ts";
+import {
+  addPending,
+  elapsedMinutes,
+  judgeTiming,
+  pickNext,
+  removePending,
+  type PendingReply,
+} from "../core/pending-replies.ts";
 import type { ThreadsPost } from "../content/threads.ts";
 
 const DRAFTS = ".data/drafts.json";
+const PENDING = ".data/pending-replies.json";
 
 /**
  * `.env` 값을 읽되 **빈 줄은 없는 것으로 친다.**
@@ -185,7 +195,7 @@ async function cmdGenerate(topic: string): Promise<void> {
 }
 
 // ── publish ────────────────────────────────────────────────
-async function cmdPublish(indexArg: string, dry: boolean): Promise<void> {
+async function cmdPublish(indexArg: string, dry: boolean, withReply: boolean): Promise<void> {
   if (!existsSync(DRAFTS)) throw new Error(`${DRAFTS} 가 없다. 먼저 generate 하세요`);
 
   const saved = JSON.parse(readFileSync(DRAFTS, "utf8")) as {
@@ -203,12 +213,12 @@ async function cmdPublish(indexArg: string, dry: boolean): Promise<void> {
 
   const comment = post.first_comment?.trim();
 
-  console.log(`\n올릴 글 (${text.length}자):\n`);
+  console.log(`\n올릴 글 (${countChars(text)}자):\n`);
   console.log(text.split("\n").map((l) => `   ${l}`).join("\n"));
   console.log();
 
   if (comment) {
-    console.log(`이어서 달 첫 댓글 (${comment.length}자):\n`);
+    console.log(`이어서 달 첫 댓글 (${countChars(comment)}자):\n`);
     console.log(comment.split("\n").map((l) => `   ${l}`).join("\n"));
     console.log();
   } else {
@@ -240,7 +250,10 @@ async function cmdPublish(indexArg: string, dry: boolean): Promise<void> {
   // 아래가 실패해도 명령 전체를 실패로 만들면 안 된다.
   // 사람이 "실패했네" 하고 다시 돌리면 본문이 두 번 올라간다.
   // 워커(publish-due.ts)가 쓰는 규칙과 같다.
-  if (comment) {
+  if (!comment) {
+    console.log();
+  } else if (withReply) {
+    // 예전 동작. 본문과 같은 분에 나가므로 봇 티가 난다.
     try {
       const rc = await c.replyTo(r.mediaId, comment);
       console.log(`  첫 댓글  : 달렸습니다 (${rc.mediaId})\n`);
@@ -250,10 +263,83 @@ async function cmdPublish(indexArg: string, dry: boolean): Promise<void> {
       console.log("           본문은 이미 올라갔습니다. 다시 돌리지 말고 손으로 다세요.\n");
     }
   } else {
-    console.log();
+    writePending(
+      addPending(readPending(), {
+        mediaId: r.mediaId,
+        ...(r.permalink ? { permalink: r.permalink } : {}),
+        topic: saved.topic,
+        hookType: post.hook_type,
+        text: comment,
+        publishedAt: new Date().toISOString(),
+      }),
+    );
+    console.log(`  첫 댓글  : 대기로 남겼습니다 — 20~120분 뒤에 아래 명령으로 다세요`);
+    console.log(`             npm run cli -- reply\n`);
   }
 
   rememberHook(post.hook_type);
+}
+
+// ── reply / pending ────────────────────────────────────────
+function readPending(): PendingReply[] {
+  if (!existsSync(PENDING)) return [];
+  try {
+    return JSON.parse(readFileSync(PENDING, "utf8")) as PendingReply[];
+  } catch {
+    return [];
+  }
+}
+
+function writePending(list: readonly PendingReply[]): void {
+  mkdirSync(".data", { recursive: true });
+  writeFileSync(PENDING, JSON.stringify(list, null, 2), "utf8");
+}
+
+function cmdPending(): void {
+  const list = readPending();
+  if (!list.length) {
+    console.log("\n대기 중인 첫 댓글이 없습니다.\n");
+    return;
+  }
+  console.log(`\n대기 중인 첫 댓글 ${list.length}건\n`);
+  for (const p of list) {
+    const { note } = judgeTiming(elapsedMinutes(p));
+    console.log(`  ${p.hookType} — ${p.topic}`);
+    console.log(`    ${note}`);
+    console.log(`    ${p.text.slice(0, 40)}...`);
+    console.log(`    ${p.permalink ?? p.mediaId}\n`);
+  }
+}
+
+/**
+ * 대기 중인 첫 댓글 하나를 단다. 가장 먼저 올라간 글부터.
+ *
+ * 시점이 이르거나 늦으면 말은 하되 막지는 않는다 — 명령을 친 사람이 사정을 안다.
+ */
+async function cmdReply(dry: boolean): Promise<void> {
+  const list = readPending();
+  const next = pickNext(list);
+  if (!next) {
+    console.log("\n대기 중인 첫 댓글이 없습니다.\n");
+    return;
+  }
+
+  const { verdict, note } = judgeTiming(elapsedMinutes(next));
+  console.log(`\n대상: ${next.hookType} — ${next.topic}`);
+  console.log(`${verdict === "good" ? "" : "⚠️  "}${note}\n`);
+  console.log(`달 첫 댓글 (${countChars(next.text)}자):\n`);
+  console.log(next.text.split("\n").map((l) => `   ${l}`).join("\n"));
+  console.log();
+
+  if (dry) {
+    console.log("--dry — 여기까지. 실제로 달지 않았다.\n");
+    return;
+  }
+
+  const rc = await client().replyTo(next.mediaId, next.text);
+  // 성공한 뒤에만 목록에서 뺀다. 실패하면 대기로 남아 다시 시도할 수 있다.
+  writePending(removePending(list, next.mediaId));
+  console.log(`✓ 달렸습니다 (${rc.mediaId})\n`);
 }
 
 // ── 훅 로테이션 기록 ───────────────────────────────────────
@@ -280,12 +366,15 @@ function rememberHook(hookType: string): void {
 // ── 진입 ───────────────────────────────────────────────────
 const [cmd, ...rest] = process.argv.slice(2);
 const dry = rest.includes("--dry");
+const withReply = rest.includes("--with-reply");
 const args = rest.filter((a) => !a.startsWith("--"));
 
 try {
   if (cmd === "connect") await cmdConnect();
   else if (cmd === "generate") await cmdGenerate(args.join(" "));
-  else if (cmd === "publish") await cmdPublish(args[0] ?? "", dry);
+  else if (cmd === "publish") await cmdPublish(args[0] ?? "", dry, withReply);
+  else if (cmd === "reply") await cmdReply(dry);
+  else if (cmd === "pending") cmdPending();
   else {
     console.log(`
 사용법
@@ -293,6 +382,11 @@ try {
   npm run cli -- generate "<주제>"     글 3종 생성 → 검증 → 저장
   npm run cli -- publish <번호>        실제 발행
   npm run cli -- publish <번호> --dry  발행 직전까지만
+  npm run cli -- pending              대기 중인 첫 댓글 보기
+  npm run cli -- reply                대기 중 첫 댓글 하나 달기 (20~120분 뒤)
+
+첫 댓글은 본문과 같이 나가지 않는다. 같은 분에 올라가면 봇 티가 난다.
+  publish <번호> --with-reply         (예전 동작) 첫 댓글까지 한 번에
 `);
   }
 } catch (e) {

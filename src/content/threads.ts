@@ -66,6 +66,22 @@ export const MAX_HOOK_CHARS = 35;
 export const MIN_COMMENT_CHARS = 80;
 export const MAX_COMMENT_CHARS = 250;
 
+/** 이 이상은 장식이 내용을 가린다. */
+export const MAX_EMOJI = 6;
+
+/**
+ * 이모지 규칙. 상품 글과 주제 글이 같이 쓴다.
+ *
+ * 이모지는 장식이 아니라 **어디를 보라는 표시**다. 남발하면 표시가 아니라
+ * 배경이 되고, 그 순간 글이 광고처럼 읽힌다.
+ */
+export const EMOJI_RULES: readonly string[] = [
+  `- 이모지로 포인트를 짚는다. 글 전체에 2~4개, 한 줄에 1개까지. 최대 ${MAX_EMOJI}개.`,
+  "  문단 첫머리나 핵심 문장 끝에 하나씩. 연달아 붙이지 마라(✨✨, 💄💧 금지).",
+  "  뜻 없는 장식은 넣지 마라 — 그 줄이 무슨 이야기인지 보이는 것으로 고른다.",
+  "- 훅에는 이모지를 최대 1개. 훅은 글자로 멈추게 하는 자리다.",
+];
+
 /** 상품 글과 주제 글이 같은 문구를 쓴다. 한 군데서만 고치도록 여기 둔다. */
 export const FIRST_COMMENT_RULES: readonly string[] = [
   `- first_comment: 본문 바로 아래 내가 달 첫 댓글. ${MIN_COMMENT_CHARS}~${MAX_COMMENT_CHARS}자.`,
@@ -163,6 +179,7 @@ export function buildThreadsPrompt(
     "- 본문은 한 문장으로 끝내지 마라. 장면·과정·바뀐 점 중 하나는 반드시 들어간다.",
     `- CTA 문구는 반드시 ${CTA_PLACEHOLDER} 자리표시자로 둔다. 실제 URL 을 쓰지 마라.`,
     `- cta_kind 는 ${CTA_KINDS.join(" / ")} 중 하나.`,
+    ...EMOJI_RULES,
     ...FIRST_COMMENT_RULES,
     '- 출력: {"posts":[{"hook_type","structure","text","char_count","cta_kind","first_comment"}]}',
   ].join("\n");
@@ -225,6 +242,23 @@ const EFFECT_CLAIM_RE: readonly RegExp[] = [
   /\d+\s*일\s*만에/,
 ];
 
+/**
+ * 사람이 세는 대로 센다.
+ *
+ * `"💄".length` 는 2 고 `"👩‍💻".length` 는 5 다. 그대로 쓰면 이모지를 넣을수록
+ * 본문 상한이 조용히 줄고, 화면에 찍는 글자수도 틀린 숫자가 된다.
+ */
+export function countChars(text: string): number {
+  return [...text].length;
+}
+
+/** 이모지 하나. 결합 문자까지 정확히 세려는 게 아니라 남발을 알아채려는 것이다. */
+const EMOJI_RE = /\p{Extended_Pictographic}/gu;
+
+export function countEmoji(text: string): number {
+  return (text.match(EMOJI_RE) ?? []).length;
+}
+
 const URL_RE = /https?:\/\/\S+/;
 const ROUNDED_RE = /(약|대략|한)\s*\d+\s*(개월|년|일|주|시간|분|명|개)/;
 /** 첫 줄이 단정 종결로 끝나면 훅이 답을 줘버린 것 */
@@ -239,7 +273,7 @@ export function validatePosts(raw: readonly ThreadsPost[]): ValidationResult {
   const warnings: string[] = [];
 
   // char_count 는 모델을 믿지 않고 코드가 다시 센다
-  const posts: ThreadsPost[] = raw.map((p) => ({ ...p, char_count: p.text.length }));
+  const posts: ThreadsPost[] = raw.map((p) => ({ ...p, char_count: countChars(p.text) }));
 
   if (posts.length !== 3) {
     errors.push(`글이 3개가 아니다 (${posts.length}개)`);
@@ -289,9 +323,10 @@ export function validatePosts(raw: readonly ThreadsPost[]): ValidationResult {
     if (!c) {
       errors.push(`${n}번 글에 first_comment 가 없다`);
     } else {
-      if (c.length < MIN_COMMENT_CHARS || c.length > MAX_COMMENT_CHARS) {
+      const cLen = countChars(c);
+      if (cLen < MIN_COMMENT_CHARS || cLen > MAX_COMMENT_CHARS) {
         errors.push(
-          `${n}번 글의 첫 댓글이 ${MIN_COMMENT_CHARS}~${MAX_COMMENT_CHARS}자를 벗어난다 (${c.length}자)`,
+          `${n}번 글의 첫 댓글이 ${MIN_COMMENT_CHARS}~${MAX_COMMENT_CHARS}자를 벗어난다 (${cLen}자)`,
         );
       }
       // 본문을 되풀이하는 댓글은 달 이유가 없다.
@@ -322,6 +357,13 @@ export function validatePosts(raw: readonly ThreadsPost[]): ValidationResult {
         );
         break;
       }
+    }
+
+    const emoji = countEmoji(p.text);
+    if (emoji > MAX_EMOJI) {
+      warnings.push(
+        `${n}번 글에 이모지가 ${emoji}개다 — ${MAX_EMOJI}개를 넘으면 장식이 내용을 가린다`,
+      );
     }
 
     if (ROUNDED_RE.test(firstLine)) {

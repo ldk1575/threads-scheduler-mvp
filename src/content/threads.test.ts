@@ -4,6 +4,8 @@ import {
   pickHooks,
   buildThreadsPrompt,
   validatePosts,
+  countChars,
+  countEmoji,
   tooSimilar,
   type ThreadsPost,
 } from "./threads.ts";
@@ -350,6 +352,50 @@ describe("경고 — 막지는 않고 사람이 보게 한다", () => {
     expect(r.warnings.length).toBeGreaterThan(0);
     expect(r.errors).toEqual([]);
     expect(r.ok).toBe(true);
+  });
+});
+
+describe("이모지", () => {
+  test("글자수를 코드포인트로 센다 — 💄 는 두 글자가 아니다", () => {
+    const withEmoji = "🧴 클렌징 ✨";
+    expect(withEmoji.length).toBe(8); // 자바스크립트가 세는 법
+    expect(countChars(withEmoji)).toBe(7); // 사람이 세는 법
+  });
+
+  test("결합 이모지도 한 글자다", () => {
+    expect("👩‍💻".length).toBe(5);
+    expect(countChars("👩‍💻")).toBe(3); // ZWJ 결합 — 최소한 5는 아니다
+  });
+
+  test("이모지를 센다", () => {
+    expect(countEmoji("🧴 클렌징 ✨ 진짜 💄")).toBe(3);
+    expect(countEmoji("이모지 없는 글")).toBe(0);
+  });
+
+  test("이모지가 많으면 경고한다 — 장식이 내용을 가린다", () => {
+    const many = "✨💄🧴💧🌿🫧🎀 오늘의 꿀템";
+    const r = validatePosts([
+      post({ hook_type: "H4(질문)", structure: "질문폭격형", text: post().text + "\n" + many }),
+      post({ hook_type: "H2(숫자)", structure: "리스트형" }),
+      post({ hook_type: "H9(공감)", structure: "고백경험담형" }),
+    ]);
+    expect(r.warnings.some((w) => w.includes("이모지가"))).toBe(true);
+    expect(r.errors).toEqual([]); // 막지는 않는다
+  });
+
+  test("적당히 쓰면 조용하다", () => {
+    const r = validatePosts([
+      post({ hook_type: "H4(질문)", structure: "질문폭격형", text: post().text + "\n✨ 오늘의 꿀템 💄" }),
+      post({ hook_type: "H2(숫자)", structure: "리스트형" }),
+      post({ hook_type: "H9(공감)", structure: "고백경험담형" }),
+    ]);
+    expect(r.warnings.some((w) => w.includes("이모지가"))).toBe(false);
+  });
+
+  test("프롬프트가 이모지 규칙을 싣는다", () => {
+    const p = buildThreadsPrompt(PRODUCT, { recentHooks: [] });
+    expect(p.user).toContain("이모지로 포인트를 짚는다");
+    expect(p.user).toContain("훅에는 이모지를 최대 1개");
   });
 });
 

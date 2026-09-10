@@ -8,6 +8,7 @@
 
 import {
   CTA_PLACEHOLDER,
+  EMOJI_RULES,
   FIRST_COMMENT_RULES,
   MAX_HOOK_CHARS,
   MAX_POST_CHARS,
@@ -104,6 +105,7 @@ export function buildTopicPrompt(
     "- 본문은 한 문장으로 끝내지 마라. 장면·과정·바뀐 점 중 하나는 반드시 들어간다.",
     ctaLine,
     `- cta_kind 는 ${CTA_KINDS.join(" / ")} 중 하나.`,
+    ...EMOJI_RULES,
     ...FIRST_COMMENT_RULES,
     '- 출력: {"posts":[{"hook_type","structure","text","char_count","cta_kind","first_comment"}]}',
   ].join("\n");

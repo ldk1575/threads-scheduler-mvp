@@ -41,7 +41,30 @@ const CTA_KINDS = ["댓글유도", "프로필클릭", "저장유도"] as const;
 export type CtaKind = (typeof CTA_KINDS)[number];
 
 export const CTA_PLACEHOLDER = "{{CTA_링크문구}}";
-export const MAX_POST_CHARS = 100;
+
+/**
+ * 본문 길이.
+ *
+ * 스레드 자체 상한은 500자다. 그보다 낮게 잡은 건 끝까지 읽히는 길이가 따로 있어서다.
+ *
+ * **하한이 진짜 장치다.** 상한만 걸어 두면 모델은 계속 짧게 쓴다 — 짧은 게 안전하니까.
+ * 실제로 100자 상한만 있던 동안 올라간 글은 전부 "훅 + 한 문장 + 질문"이었고,
+ * 구조 목록에 있는 고백경험담형·스토리텔링형이 들어갈 자리가 없었다.
+ */
+export const MIN_POST_CHARS = 200;
+export const MAX_POST_CHARS = 350;
+
+/** 첫 댓글 길이. 본문보다 짧아야 부연으로 읽힌다. */
+export const MIN_COMMENT_CHARS = 80;
+export const MAX_COMMENT_CHARS = 250;
+
+/** 상품 글과 주제 글이 같은 문구를 쓴다. 한 군데서만 고치도록 여기 둔다. */
+export const FIRST_COMMENT_RULES: readonly string[] = [
+  `- first_comment: 본문 바로 아래 내가 달 첫 댓글. ${MIN_COMMENT_CHARS}~${MAX_COMMENT_CHARS}자.`,
+  "  본문을 요약하거나 반복하지 마라. **본문에 안 쓴 구체적인 것 하나**를 담는다 —",
+  "  실패했던 순간, 해보고 알게 된 디테일, 사람들이 자주 틀리는 지점 중 하나.",
+  "  링크·URL 을 넣지 마라.",
+];
 
 /**
  * 훅을 고른다.
@@ -110,7 +133,7 @@ export function buildThreadsPrompt(
   const system = [
     "너는 스레드에서 숏폼 텍스트 콘텐츠를 만드는 전문가다.",
     `[내 정보] 타겟:${product.targetCustomer} / 말투:${product.tone}${product.experience ? ` / 경험:${product.experience}` : ""}`,
-    `글은 항상 스레드 숏폼 기준(${MAX_POST_CHARS}자 이내, 복사해 바로 올릴 완성본)으로 만든다.`,
+    `글은 스레드 기준 ${MIN_POST_CHARS}~${MAX_POST_CHARS}자(복사해 바로 올릴 완성본)로 만든다. 짧게 끝내지 마라.`,
     "전문용어 금지, 과장·단정 금지, 직접 판매어(구매/신청/최저가) 금지.",
     "첫 줄은 훅이다. 훅에서 답을 주지 마라 — 궁금증만 남기고 답은 본문에 둔다.",
     "숫자는 반올림하지 않는다. '약 3개월'이 아니라 '87일'처럼 쓴다.",
@@ -128,10 +151,12 @@ export function buildThreadsPrompt(
     "- 스레드 글 3개. 아래 지정된 훅을 하나씩 쓴다. 구조 유형도 서로 달라야 한다.",
     ...hooks.map((h, i) => `  ${i + 1}) ${h.id} ${h.name} — ${h.formula}`),
     "- 구조 유형은 다음에서 고른다: 고백경험담형 / 리스트형 / 반전형 / 비교형 / 질문폭격형 / 한줄반복형 / 스토리텔링형 / 대댓글유도형",
-    `- 각 글: 첫 줄 훅(35자 이내) + 본문 + 마지막 줄 CTA. 전체 ${MAX_POST_CHARS}자 이내.`,
+    `- 각 글: 첫 줄 훅(35자 이내) + 본문 + 마지막 줄 CTA. 전체 ${MIN_POST_CHARS}~${MAX_POST_CHARS}자.`,
+    "- 본문은 한 문장으로 끝내지 마라. 장면·과정·바뀐 점 중 하나는 반드시 들어간다.",
     `- CTA 문구는 반드시 ${CTA_PLACEHOLDER} 자리표시자로 둔다. 실제 URL 을 쓰지 마라.`,
     `- cta_kind 는 ${CTA_KINDS.join(" / ")} 중 하나.`,
-    '- 출력: {"posts":[{"hook_type","structure","text","char_count","cta_kind"}]}',
+    ...FIRST_COMMENT_RULES,
+    '- 출력: {"posts":[{"hook_type","structure","text","char_count","cta_kind","first_comment"}]}',
   ].join("\n");
 
   return { system, user, hooks };
@@ -147,6 +172,13 @@ export type ThreadsPost = {
   text: string;
   char_count: number;
   cta_kind: CtaKind;
+  /**
+   * 본문 바로 아래 내가 다는 첫 댓글.
+   *
+   * 본문에서 못 한 구체적인 이야기 하나를 담는다. 요약이 아니다 —
+   * 요약이면 스크롤을 멈출 이유가 없다. 그래서 본문과 겹치면 거절한다.
+   */
+  first_comment: string;
 };
 
 export type ValidationResult = {
@@ -219,6 +251,31 @@ export function validatePosts(raw: readonly ThreadsPost[]): ValidationResult {
 
     if (p.char_count > MAX_POST_CHARS) {
       errors.push(`${n}번 글이 ${MAX_POST_CHARS}자를 넘는다 (${p.char_count}자)`);
+    }
+
+    if (p.char_count < MIN_POST_CHARS) {
+      errors.push(
+        `${n}번 글이 ${MIN_POST_CHARS}자에 못 미친다 (${p.char_count}자) — 훅과 질문만 있고 이야기가 없다`,
+      );
+    }
+
+    // ── 첫 댓글 ────────────────────────────────────────────
+    const c = (p.first_comment ?? "").trim();
+    if (!c) {
+      errors.push(`${n}번 글에 first_comment 가 없다`);
+    } else {
+      if (c.length < MIN_COMMENT_CHARS || c.length > MAX_COMMENT_CHARS) {
+        errors.push(
+          `${n}번 글의 첫 댓글이 ${MIN_COMMENT_CHARS}~${MAX_COMMENT_CHARS}자를 벗어난다 (${c.length}자)`,
+        );
+      }
+      // 본문을 되풀이하는 댓글은 달 이유가 없다.
+      if (tooSimilar(c, [p.text])) {
+        errors.push(`${n}번 글의 첫 댓글이 본문과 너무 겹친다 — 본문에 없던 이야기를 담아야 한다`);
+      }
+      if (URL_RE.test(c)) {
+        errors.push(`${n}번 글의 첫 댓글에 실제 URL 이 있다 — 링크는 배포 시 주입한다`);
+      }
     }
 
     if (!CTA_KINDS.includes(p.cta_kind)) {

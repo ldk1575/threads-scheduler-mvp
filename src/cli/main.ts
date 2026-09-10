@@ -76,6 +76,9 @@ async function cmdGenerate(topic: string): Promise<void> {
       ...(process.env["PERSONA_EXPERIENCE"]
         ? { experience: process.env["PERSONA_EXPERIENCE"] }
         : {}),
+      ...(process.env["PERSONA_CATEGORY"]
+        ? { category: process.env["PERSONA_CATEGORY"] }
+        : {}),
       withLink: Boolean(process.env["TRACKING_LINK"]),
     },
     { recentHooks: recent },
@@ -131,6 +134,10 @@ async function cmdGenerate(topic: string): Promise<void> {
   posts.forEach((p, i) => {
     console.log(`── ${i + 1}. ${p.hook_type} · ${p.structure} · ${p.text.length}자 · ${p.cta_kind}`);
     console.log(p.text.split("\n").map((l) => `   ${l}`).join("\n"));
+    if (p.first_comment) {
+      console.log(`\n   └ 첫 댓글 (${p.first_comment.length}자)`);
+      console.log(p.first_comment.split("\n").map((l) => `     ${l}`).join("\n"));
+    }
     console.log();
   });
 
@@ -183,9 +190,19 @@ async function cmdPublish(indexArg: string, dry: boolean): Promise<void> {
     ? injectTrackingLink(post.text, link, THREADS_MAX_CHARS).text
     : post.text;
 
+  const comment = post.first_comment?.trim();
+
   console.log(`\n올릴 글 (${text.length}자):\n`);
   console.log(text.split("\n").map((l) => `   ${l}`).join("\n"));
   console.log();
+
+  if (comment) {
+    console.log(`이어서 달 첫 댓글 (${comment.length}자):\n`);
+    console.log(comment.split("\n").map((l) => `   ${l}`).join("\n"));
+    console.log();
+  } else {
+    console.log("첫 댓글 없음 — 본문만 올라간다.\n");
+  }
 
   if (dry) {
     console.log("--dry — 여기까지. 실제로 올리지 않았다.\n");
@@ -206,7 +223,24 @@ async function cmdPublish(indexArg: string, dry: boolean): Promise<void> {
   const r = await c.publishText(text);
   console.log(`\n✓ 올라갔습니다`);
   console.log(`  media id : ${r.mediaId}`);
-  console.log(`  permalink: ${r.permalink ?? "(조회 실패 — 프로필에서 확인하세요)"}\n`);
+  console.log(`  permalink: ${r.permalink ?? "(조회 실패 — 프로필에서 확인하세요)"}`);
+
+  // ── 여기서부터 본문은 이미 올라갔다 ─────────────────────
+  // 아래가 실패해도 명령 전체를 실패로 만들면 안 된다.
+  // 사람이 "실패했네" 하고 다시 돌리면 본문이 두 번 올라간다.
+  // 워커(publish-due.ts)가 쓰는 규칙과 같다.
+  if (comment) {
+    try {
+      const rc = await c.replyTo(r.mediaId, comment);
+      console.log(`  첫 댓글  : 달렸습니다 (${rc.mediaId})\n`);
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      console.log(`  첫 댓글  : ✗ 실패 — ${m}`);
+      console.log("           본문은 이미 올라갔습니다. 다시 돌리지 말고 손으로 다세요.\n");
+    }
+  } else {
+    console.log();
+  }
 
   rememberHook(post.hook_type);
 }

@@ -22,9 +22,20 @@ function post(over: Partial<ThreadsPost> = {}): ThreadsPost {
   return {
     hook_type: "H4(질문)",
     structure: "질문폭격형",
-    text: "오후만 되면 피부 당기지 않아요?\n\n크림을 두껍게 바를 게 아니라\n수분을 잡아두는 게 핵심이더라고요.\n\n{{CTA_링크문구}}",
+    text:
+      "오후만 되면 피부 당기지 않아요?\n\n" +
+      "크림을 두껍게 바를 게 아니라 수분을 잡아두는 게 핵심이더라고요.\n" +
+      "처음엔 저도 제형이 묵직한 걸 골랐는데, 바를 때만 촉촉하고 세 시간 지나면 똑같았어요.\n" +
+      "순서를 바꿔 봤습니다. 씻고 나서 물기 남아 있을 때 얇게 한 겹, 그다음에 덮는 걸로요.\n" +
+      "그러고 나서야 오후에 당기는 느낌이 줄었습니다.\n" +
+      "양을 늘린 게 아니라 넣는 순서를 옮긴 것뿐인데 그렇게 됐어요.\n" +
+      "돈 더 쓰기 전에 이것부터 해보셔도 될 것 같습니다.\n\n{{CTA_링크문구}}",
     char_count: 0,
     cta_kind: "프로필클릭",
+    first_comment:
+      "참고로 저는 겨울에만 이렇게 합니다.\n" +
+      "여름엔 겹쳐 바르면 답답해서 오히려 한 겹으로 끝내요.\n" +
+      "계절 따라 다르게 가는 게 맞더라고요. 같은 통인데 체감이 완전히 달라집니다.",
     ...over,
   };
 }
@@ -92,8 +103,9 @@ describe("프롬프트 조립", () => {
 
   test("절대 규칙이 프롬프트에 들어간다", () => {
     const p = buildThreadsPrompt(PRODUCT, { recentHooks: [] });
-    expect(p.system).toContain("100자");
+    expect(p.system).toContain("200~350자");
     expect(p.user).toContain("{{CTA_링크문구}}");
+    expect(p.user).toContain("first_comment");
     expect(p.system).toMatch(/판매어|구매/);
   });
 });
@@ -165,13 +177,57 @@ describe("검증 게이트", () => {
     expect(r.errors.join()).toMatch(/URL/);
   });
 
-  test("100자를 넘으면 거절", () => {
+  test("350자를 넘으면 거절", () => {
     const r = validatePosts([
-      post({ text: "가".repeat(120) + "\n{{CTA_링크문구}}" }),
+      post({ text: "가".repeat(400) + "\n{{CTA_링크문구}}" }),
       post({ hook_type: "H2(숫자)", structure: "리스트형" }),
       post({ hook_type: "H9(공감)", structure: "반전형" }),
     ]);
-    expect(r.errors.join()).toMatch(/100자/);
+    expect(r.errors.join()).toMatch(/350자를 넘는다/);
+  });
+
+  /**
+   * 하한이 이 게이트의 핵심이다.
+   *
+   * 상한만 걸려 있던 동안 모델은 계속 100자 아래로 썼다 — 짧은 게 안전하니까.
+   * 실제로 올라간 글 12개가 전부 "훅 + 한 문장 + 질문"이었다.
+   */
+  test("200자에 못 미치면 거절", () => {
+    const r = validatePosts([
+      post({ text: "오늘 이거 알았어요?\n\n별거 아니네요.\n\n{{CTA_링크문구}}" }),
+      post({ hook_type: "H2(숫자)", structure: "리스트형" }),
+      post({ hook_type: "H9(공감)", structure: "반전형" }),
+    ]);
+    expect(r.errors.join()).toMatch(/200자에 못 미친다/);
+  });
+
+  test("first_comment 가 없으면 거절", () => {
+    const r = validatePosts([
+      post({ first_comment: "" }),
+      post({ hook_type: "H2(숫자)", structure: "리스트형" }),
+      post({ hook_type: "H9(공감)", structure: "반전형" }),
+    ]);
+    expect(r.errors.join()).toMatch(/first_comment 가 없다/);
+  });
+
+  test("first_comment 가 짧으면 거절", () => {
+    const r = validatePosts([
+      post({ first_comment: "좋아요!" }),
+      post({ hook_type: "H2(숫자)", structure: "리스트형" }),
+      post({ hook_type: "H9(공감)", structure: "반전형" }),
+    ]);
+    expect(r.errors.join()).toMatch(/첫 댓글이 80~250자를 벗어난다/);
+  });
+
+  /** 본문을 되풀이하는 댓글은 스크롤을 멈출 이유가 없다. */
+  test("first_comment 가 본문과 겹치면 거절", () => {
+    const base = post();
+    const r = validatePosts([
+      { ...base, first_comment: base.text.replace("{{CTA_링크문구}}", "").trim() },
+      post({ hook_type: "H2(숫자)", structure: "리스트형" }),
+      post({ hook_type: "H9(공감)", structure: "반전형" }),
+    ]);
+    expect(r.errors.join()).toMatch(/첫 댓글이 본문과 너무 겹친다/);
   });
 
   test("cta_kind 는 세 종류만 허용", () => {

@@ -54,6 +54,14 @@ export const CTA_PLACEHOLDER = "{{CTA_링크문구}}";
 export const MIN_POST_CHARS = 200;
 export const MAX_POST_CHARS = 350;
 
+/**
+ * 훅 길이 상한.
+ *
+ * 스레드 미리보기에서 잘리는 지점이다. 잘린 훅은 궁금증이 아니라 사고로 읽힌다.
+ * 프롬프트에도 이 값을 넣어 쓴다 — 요구하는 값과 재는 값이 갈리면 안 된다.
+ */
+export const MAX_HOOK_CHARS = 35;
+
 /** 첫 댓글 길이. 본문보다 짧아야 부연으로 읽힌다. */
 export const MIN_COMMENT_CHARS = 80;
 export const MAX_COMMENT_CHARS = 250;
@@ -151,7 +159,7 @@ export function buildThreadsPrompt(
     "- 스레드 글 3개. 아래 지정된 훅을 하나씩 쓴다. 구조 유형도 서로 달라야 한다.",
     ...hooks.map((h, i) => `  ${i + 1}) ${h.id} ${h.name} — ${h.formula}`),
     "- 구조 유형은 다음에서 고른다: 고백경험담형 / 리스트형 / 반전형 / 비교형 / 질문폭격형 / 한줄반복형 / 스토리텔링형 / 대댓글유도형",
-    `- 각 글: 첫 줄 훅(35자 이내) + 본문 + 마지막 줄 CTA. 전체 ${MIN_POST_CHARS}~${MAX_POST_CHARS}자.`,
+    `- 각 글: 첫 줄 훅(${MAX_HOOK_CHARS}자 이내) + 본문 + 마지막 줄 CTA. 전체 ${MIN_POST_CHARS}~${MAX_POST_CHARS}자.`,
     "- 본문은 한 문장으로 끝내지 마라. 장면·과정·바뀐 점 중 하나는 반드시 들어간다.",
     `- CTA 문구는 반드시 ${CTA_PLACEHOLDER} 자리표시자로 둔다. 실제 URL 을 쓰지 마라.`,
     `- cta_kind 는 ${CTA_KINDS.join(" / ")} 중 하나.`,
@@ -198,6 +206,23 @@ const BANNED = [
   /100\s*%/,
   /완치/,
   /효과\s*보장/,
+];
+
+/**
+ * 화장품 효능 단정.
+ *
+ * 개인 후기 형식이어도 "쓰면 이렇게 된다"로 읽히면 위험하다. 다만 진짜 겪은
+ * 일일 수도 있어서 **경고로만 띄운다** — 막지 않고 사람이 보게 한다.
+ *
+ * 좁게 잡는다. '성인' 오탐에서 봤듯이 넓은 규칙은 멀쩡한 글을 잡아먹는다.
+ * 실제 출력에서 나온 것만 넣었다.
+ */
+const EFFECT_CLAIM_RE: readonly RegExp[] = [
+  // 사이에 부사가 낀다 — "모공이 **서서히** 줄어드는". 다만 한글·공백만,
+  // 그것도 몇 글자까지만 허용한다. 문장을 건너뛰며 잡으면 오탐이 된다.
+  /모공[이가]?[가-힣\s]{0,6}(줄어|작아|축소)/,
+  /(싹|완전히|말끔히)[가-힣\s]{0,4}(사라|없어)/,
+  /\d+\s*일\s*만에/,
 ];
 
 const URL_RE = /https?:\/\/\S+/;
@@ -280,6 +305,23 @@ export function validatePosts(raw: readonly ThreadsPost[]): ValidationResult {
 
     if (!CTA_KINDS.includes(p.cta_kind)) {
       errors.push(`${n}번 글의 cta_kind 가 허용값이 아니다 (${String(p.cta_kind)})`);
+    }
+
+    if ([...firstLine].length > MAX_HOOK_CHARS) {
+      warnings.push(
+        `${n}번 글의 훅이 ${MAX_HOOK_CHARS}자를 넘는다 (${[...firstLine].length}자) — 스레드 미리보기에서 잘린다`,
+      );
+    }
+
+    // 본문과 첫 댓글을 함께 본다. 단정은 댓글에서도 똑같이 문제가 된다.
+    for (const re of EFFECT_CLAIM_RE) {
+      const hit = re.exec(p.text) ?? re.exec(p.first_comment ?? "");
+      if (hit) {
+        warnings.push(
+          `${n}번 글에 효과 단정으로 읽힐 표현이 있다 ("${hit[0]}") — 겪은 일이어도 단정으로 읽히면 위험하다`,
+        );
+        break;
+      }
     }
 
     if (ROUNDED_RE.test(firstLine)) {

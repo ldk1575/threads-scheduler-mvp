@@ -271,6 +271,88 @@ describe("검증 게이트", () => {
 // ───────────────────────────────────────────────
 // 반복 방지 — 같은 계정이 비슷한 글을 계속 올리면 도달이 떨어진다
 // ───────────────────────────────────────────────
+describe("경고 — 막지는 않고 사람이 보게 한다", () => {
+  /** 훅만 갈아끼운 3종. 오류 없이 경고만 남게 만든다. */
+  function three(firstLines: readonly string[]) {
+    const kinds = [
+      { hook_type: "H4(질문)", structure: "질문폭격형" },
+      { hook_type: "H2(숫자)", structure: "리스트형" },
+      { hook_type: "H9(공감)", structure: "고백경험담형" },
+    ];
+    return validatePosts(
+      kinds.map((k, i) => {
+        const base = post(k);
+        const rest = base.text.split("\n").slice(1).join("\n");
+        return { ...base, text: (firstLines[i] ?? firstLines[0] ?? "") + "\n" + rest };
+      }),
+    );
+  }
+
+  const OK_HOOK = "오후만 되면 피부 당기지 않아요?";
+
+  test("훅이 35자를 넘으면 경고한다 — 미리보기에서 잘린다", () => {
+    // 실제로 나왔던 37자 훅
+    const long = "다들 지성 피부는 오일 쓰면 안 된다는데, 사실 완전 반대더라고요.";
+    expect([...long].length).toBe(37);
+
+    const r = three([long, OK_HOOK, OK_HOOK]);
+    expect(r.warnings.some((w) => w.includes("훅이 35자를 넘는다 (37자)"))).toBe(true);
+  });
+
+  test("35자 이하면 조용하다", () => {
+    const r = three([OK_HOOK, OK_HOOK, OK_HOOK]);
+    expect(r.warnings.some((w) => w.includes("훅이 35자를 넘는다"))).toBe(false);
+  });
+
+  test.each(["모공이 서서히 줄어드는 게 눈에 보여", "3일 만에 피지가 없어짐", "각질이 싹 사라졌어"])(
+    "효과 단정을 경고한다 — %s",
+    (claim) => {
+      const r = validatePosts([
+        post({ hook_type: "H4(질문)", structure: "질문폭격형", text: post().text + "\n" + claim }),
+        post({ hook_type: "H2(숫자)", structure: "리스트형" }),
+        post({ hook_type: "H9(공감)", structure: "고백경험담형" }),
+      ]);
+      expect(r.warnings.some((w) => w.includes("효과 단정으로 읽힐 표현"))).toBe(true);
+    },
+  );
+
+  test("첫 댓글의 단정도 잡는다 — 댓글에서도 똑같이 문제가 된다", () => {
+    const r = validatePosts([
+      post({
+        hook_type: "H4(질문)",
+        structure: "질문폭격형",
+        first_comment: "이거 쓰고 모공이 줄어드는 게 보이더라고요. 순서만 바꿨을 뿐인데 그렇게 됐어요. 자세한 건 본문에 안 썼는데 저녁에만 쓰는 게 핵심이었어요.",
+      }),
+      post({ hook_type: "H2(숫자)", structure: "리스트형" }),
+      post({ hook_type: "H9(공감)", structure: "고백경험담형" }),
+    ]);
+    expect(r.warnings.some((w) => w.includes("효과 단정으로 읽힐 표현"))).toBe(true);
+  });
+
+  // '성인' 오탐에서 배운 것 — 넓힌 규칙은 반드시 반대편도 재 본다.
+  test.each([
+    "모공 넓어지기 전에 얼른 이 방법으로 갈아타자",
+    "오히려 오일로 피지를 녹여야 모공이 깨끗해지더라고",
+    "모공 고민 있는 지성 언니들 요즘 클렌징 뭐 써?",
+    "이 오일 다 쓰는 데 3일 걸렸어",
+  ])("멀쩡한 문장은 안 잡는다 — %s", (line) => {
+    const r = validatePosts([
+      post({ hook_type: "H4(질문)", structure: "질문폭격형", text: post().text + "\n" + line }),
+      post({ hook_type: "H2(숫자)", structure: "리스트형" }),
+      post({ hook_type: "H9(공감)", structure: "고백경험담형" }),
+    ]);
+    expect(r.warnings.some((w) => w.includes("효과 단정"))).toBe(false);
+  });
+
+  test("경고는 통과를 막지 않는다", () => {
+    const long = "다들 지성 피부는 오일 쓰면 안 된다는데, 사실 완전 반대더라고요.";
+    const r = three([long, OK_HOOK, OK_HOOK]);
+    expect(r.warnings.length).toBeGreaterThan(0);
+    expect(r.errors).toEqual([]);
+    expect(r.ok).toBe(true);
+  });
+});
+
 describe("반복 방지", () => {
   test("단어가 절반 가까이 겹치면 너무 비슷하다고 본다", () => {
     const a = "오후만 되면 피부 당기지 않아요 크림을 두껍게 바를 게 아니라 수분을 잡아두는 게 핵심";

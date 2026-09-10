@@ -36,6 +36,24 @@ export class ThreadsApiError extends Error {
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/**
+ * 읽기 호출만 재시도한다.
+ *
+ * Threads API 는 5xx 를 간헐적으로 뱉는다. 실제로 쿼터 조회가 503 을 내서
+ * 발행 명령이 통째로 죽었다 — 같은 URL 이 잠시 뒤엔 10/10 으로 성공했다.
+ *
+ * ⚠️ **쓰기(POST)는 재시도하지 않는다.** 요청은 닿았는데 응답만 유실된 경우
+ * 재시도하면 글이 두 번 올라간다. 되돌리려면 사람이 손으로 지워야 한다.
+ * 못 올리는 쪽이 두 번 올리는 쪽보다 싸다.
+ */
+const GET_RETRIES = 2;
+const RETRY_DELAYS_MS = [500, 1_500];
+
+/** 잠깐 뒤에 다시 하면 될 실패인가. core/publish.ts 의 분류와 같은 규칙이다. */
+function isTransient(status: number): boolean {
+  return status === 0 || status >= 500 || status === 429;
+}
+
 export class ThreadsClient {
   #userId: string;
   #token: string;
@@ -52,6 +70,25 @@ export class ThreadsClient {
   }
 
   async #call(path: string, init?: RequestInit): Promise<unknown> {
+    // method 가 없으면 GET 이다. 읽기만 다시 시도한다.
+    const isRead = (init?.method ?? "GET").toUpperCase() === "GET";
+    const attempts = isRead ? GET_RETRIES + 1 : 1;
+
+    let last: ThreadsApiError | undefined;
+    for (let i = 0; i < attempts; i += 1) {
+      try {
+        return await this.#callOnce(path, init);
+      } catch (e) {
+        if (!(e instanceof ThreadsApiError) || !isTransient(e.status)) throw e;
+        last = e;
+        const wait = RETRY_DELAYS_MS[i];
+        if (i < attempts - 1 && wait !== undefined) await this.#sleep(wait);
+      }
+    }
+    throw last;
+  }
+
+  async #callOnce(path: string, init?: RequestInit): Promise<unknown> {
     const sep = path.includes("?") ? "&" : "?";
     const url = `${this.#base}${path}${sep}access_token=${encodeURIComponent(this.#token)}`;
 
@@ -72,9 +109,11 @@ export class ThreadsClient {
     }
 
     if (!res.ok) {
-      const msg =
-        (body as { error?: { message?: string } })?.error?.message ??
-        `HTTP ${res.status}`;
+      // 본문이 JSON 이 아닐 때가 있다. 503 은 그냥 "Service Unavailable" 텍스트로 온다.
+      // 상태 코드만 뱉으면 무슨 일인지 못 찾으니 본문 앞부분을 붙인다.
+      const apiMsg = (body as { error?: { message?: string } })?.error?.message;
+      const snippet = text.trim().slice(0, 120);
+      const msg = apiMsg ?? (snippet ? `HTTP ${res.status} — ${snippet}` : `HTTP ${res.status}`);
       throw new ThreadsApiError(res.status, msg);
     }
     return body;

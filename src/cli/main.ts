@@ -21,8 +21,21 @@ import type { ThreadsPost } from "../content/threads.ts";
 
 const DRAFTS = ".data/drafts.json";
 
+/**
+ * `.env` 값을 읽되 **빈 줄은 없는 것으로 친다.**
+ *
+ * dotenv 는 `KEY=` 를 빈 문자열로 넣는다. `??` 는 null 만 걸러내므로 빈 문자열이
+ * 그대로 통과한다. `.env.example` 을 복사해 붙이고 몇 줄을 안 채운 사람은
+ * 기본값 대신 `""` 를 받게 된다 — 프롬프트에 `타겟:` 뒤가 비어 나가고,
+ * `userId` 는 빈 채로 URL 에 박힌다. 값이 있는지의 판정을 여기 한 곳에 모은다.
+ */
+function env(name: string): string | undefined {
+  const v = process.env[name]?.trim();
+  return v ? v : undefined;
+}
+
 function need(name: string): string {
-  const v = process.env[name];
+  const v = env(name);
   if (!v) throw new Error(`${name} 가 .env 에 없다`);
   return v;
 }
@@ -30,7 +43,7 @@ function need(name: string): string {
 function client(): ThreadsClient {
   return new ThreadsClient({
     // 대부분의 엔드포인트가 `me` 를 받는다. 명시하면 그걸 쓴다.
-    userId: process.env["THREADS_USER_ID"] ?? "me",
+    userId: env("THREADS_USER_ID") ?? "me",
     accessToken: need("THREADS_ACCESS_TOKEN"),
   });
 }
@@ -68,18 +81,16 @@ async function cmdGenerate(topic: string): Promise<void> {
   if (!topic) throw new Error('주제를 주세요: npm run cli -- generate "주제"');
 
   const recent = readRecentHooks();
+  const experience = env("PERSONA_EXPERIENCE");
+  const category = env("PERSONA_CATEGORY");
   const prompt = buildTopicPrompt(
     {
       topic,
-      audience: process.env["PERSONA_AUDIENCE"] ?? "이 주제에 관심 있는 사람",
-      tone: process.env["PERSONA_TONE"] ?? "친구에게 카톡하듯",
-      ...(process.env["PERSONA_EXPERIENCE"]
-        ? { experience: process.env["PERSONA_EXPERIENCE"] }
-        : {}),
-      ...(process.env["PERSONA_CATEGORY"]
-        ? { category: process.env["PERSONA_CATEGORY"] }
-        : {}),
-      withLink: Boolean(process.env["TRACKING_LINK"]),
+      audience: env("PERSONA_AUDIENCE") ?? "이 주제에 관심 있는 사람",
+      tone: env("PERSONA_TONE") ?? "친구에게 카톡하듯",
+      ...(experience ? { experience } : {}),
+      ...(category ? { category } : {}),
+      withLink: Boolean(env("TRACKING_LINK")),
     },
     { recentHooks: recent },
   );
@@ -112,7 +123,7 @@ async function cmdGenerate(topic: string): Promise<void> {
     };
   }
 
-  const withLink = Boolean(process.env["TRACKING_LINK"]);
+  const withLink = Boolean(env("TRACKING_LINK"));
   let { posts, provider } = await ask();
   let gate = validateTopicPosts(posts, withLink);
 
@@ -185,7 +196,7 @@ async function cmdPublish(indexArg: string, dry: boolean): Promise<void> {
   const post = saved.posts[i - 1];
   if (!post) throw new Error(`${i}번 글이 없다 (1~${saved.posts.length})`);
 
-  const link = process.env["TRACKING_LINK"];
+  const link = env("TRACKING_LINK");
   const text = link
     ? injectTrackingLink(post.text, link, THREADS_MAX_CHARS).text
     : post.text;
